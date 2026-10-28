@@ -1,0 +1,59 @@
+name: release
+
+# Monorepo releases: push a tag like `router-HA/v0.1.0`.
+# The part before the slash is the project directory, which must contain
+# its own .goreleaser.yaml and go.mod. New projects need no workflow changes.
+on:
+  push:
+    tags:
+      - "*/v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse tag
+        id: tag
+        run: |
+          project="${GITHUB_REF_NAME%/*}"
+          version="${GITHUB_REF_NAME##*/}"
+          if [[ ! -f "$project/.goreleaser.yaml" ]]; then
+            echo "::error::$project/.goreleaser.yaml not found"; exit 1
+          fi
+          echo "project=$project" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ steps.tag.outputs.project }}/go.mod
+          cache-dependency-path: ${{ steps.tag.outputs.project }}/go.sum
+
+      # GoReleaser OSS can't parse prefixed tags, so we hand it the bare
+      # semver tag, skip its own publishing, and create the release with gh.
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          workdir: ${{ steps.tag.outputs.project }}
+          args: release --clean --skip=publish,validate
+        env:
+          GORELEASER_CURRENT_TAG: ${{ steps.tag.outputs.version }}
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          flags=()
+          [[ "${{ steps.tag.outputs.prerelease }}" == "true" ]] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" \
+            --title "${{ steps.tag.outputs.project }} ${{ steps.tag.outputs.version }}" \
+            --generate-notes --verify-tag "${flags[@]}" \
+            "${{ steps.tag.outputs.project }}"/dist/*.tar.gz \
+            "${{ steps.tag.outputs.project }}"/dist/checksums.txt
