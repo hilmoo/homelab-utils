@@ -1,0 +1,91 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+# Releases are driven by pushing a tag `<project>/v<semver>` (see
+# .github/workflows/release.yml). Any new Go package only needs a go.mod and
+# a .goreleaser.yaml in its directory to work with these tasks.
+#
+#   task release PROJECT=router-HA VERSION=v0.1.0
+#   task bump    PROJECT=router-HA [LEVEL=patch|minor|major]
+#   task tags    [PROJECT=router-HA]
+
+version: '3'
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  tags:
+    desc: "List release tags (optional: PROJECT=router-HA)"
+    cmds:
+      - git tag -l "{{if .PROJECT}}{{.PROJECT}}/v*{{else}}*/v*{{end}}" --sort=-v:refname
+    silent: true
+
+  test:
+    desc: "Run go tests for a project (PROJECT=router-HA)"
+    requires:
+      vars: [PROJECT]
+    dir: '{{.PROJECT}}'
+    cmds:
+      - go vet ./...
+      - go test ./...
+
+  snapshot:
+    desc: "Build a local snapshot with goreleaser, nothing is published (PROJECT=router-HA)"
+    requires:
+      vars: [PROJECT]
+    dir: '{{.PROJECT}}'
+    cmds:
+      - goreleaser release --snapshot --clean --skip=publish
+
+  release:
+    desc: "Tag and push a release (PROJECT=router-HA VERSION=v0.1.0)"
+    requires:
+      vars: [PROJECT, VERSION]
+    vars:
+      TAG: '{{.PROJECT}}/{{.VERSION}}'
+    preconditions:
+      - sh: test -f "{{.PROJECT}}/.goreleaser.yaml"
+        msg: "{{.PROJECT}}/.goreleaser.yaml not found"
+      - sh: echo "{{.VERSION}}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+        msg: "VERSION must look like v1.2.3 or v1.2.3-rc.1"
+      - sh: test -z "$(git status --porcelain)"
+        msg: "Working tree is not clean, commit or stash first"
+      - sh: test -z "$(git tag -l '{{.TAG}}')"
+        msg: "Tag {{.TAG}} already exists"
+    prompt: "Create and push tag {{.PROJECT}}/{{.VERSION}} to origin?"
+    cmds:
+      - task: test
+        vars: {PROJECT: '{{.PROJECT}}'}
+      - git push origin HEAD
+      - git tag -a "{{.TAG}}" -m "{{.PROJECT}} {{.VERSION}}"
+      - git push origin "{{.TAG}}"
+      - echo "Pushed {{.TAG}}, the release workflow will build and publish it."
+
+  bump:
+    desc: "Release the next version from the latest tag (PROJECT=router-HA LEVEL=patch|minor|major)"
+    requires:
+      vars: [PROJECT]
+    vars:
+      LEVEL: '{{.LEVEL | default "patch"}}'
+      NEXT:
+        sh: |
+          latest=$(git tag -l "{{.PROJECT}}/v*" --sort=-v:refname | head -n1)
+          v=${latest##*/v}
+          v=${v:-0.0.0}
+          v=${v%%-*}
+          major=${v%%.*}
+          rest=${v#*.}
+          minor=${rest%%.*}
+          patch=${rest#*.}
+          case "{{.LEVEL}}" in
+            major) echo "v$((major + 1)).0.0" ;;
+            minor) echo "v${major}.$((minor + 1)).0" ;;
+            patch) echo "v${major}.${minor}.$((patch + 1))" ;;
+            *) echo "invalid LEVEL" >&2; exit 1 ;;
+          esac
+    cmds:
+      - task: release
+        vars: {PROJECT: '{{.PROJECT}}', VERSION: '{{.NEXT}}'}
