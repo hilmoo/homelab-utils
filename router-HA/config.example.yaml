@@ -6,6 +6,7 @@ ping_host: 192.168.1.4
 ping_interval: 10s
 ping_timeout: 2s
 fallback: 2m            # host must stay unreachable this long before shutdown starts
+recover_pings: 3        # consecutive pings that cancel a running shutdown sequence
 
 # --- notification ---
 discord_webhook: ""     # empty = skip

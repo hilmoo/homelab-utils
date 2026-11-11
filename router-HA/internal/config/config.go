@@ -18,6 +18,7 @@ type Config struct {
 	PingInterval time.Duration `koanf:"ping_interval"`
 	PingTimeout  time.Duration `koanf:"ping_timeout"`
 	Fallback     time.Duration `koanf:"fallback"`
+	RecoverPings int           `koanf:"recover_pings"`
 
 	DiscordWebhook string `koanf:"discord_webhook"`
 
@@ -50,6 +51,7 @@ func defaults() *Config {
 		PingInterval:  10 * time.Second,
 		PingTimeout:   2 * time.Second,
 		Fallback:      2 * time.Minute,
+		RecoverPings:  3,
 		GuestWait:     3 * time.Minute,
 		GuestForceOff: true,
 		RouterURL:     "http://192.168.1.1",

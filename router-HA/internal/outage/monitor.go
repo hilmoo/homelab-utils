@@ -17,6 +17,31 @@ func Ping(ctx context.Context, host string, timeout time.Duration) bool {
 	return exec.CommandContext(ctx, "ping", "-c", "1", "-W", secs, host).Run() == nil
 }
 
+// WaitRecovered pings host every interval until it answers n times in a row.
+// It returns false if ctx was cancelled first. A failed ping resets the count.
+func WaitRecovered(ctx context.Context, host string, interval, timeout time.Duration, n int) bool {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	ok := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
+		if !Ping(ctx, host, timeout) {
+			ok = 0
+			continue
+		}
+		ok++
+		log.Printf("%s answered (%d/%d)", host, ok, n)
+		if ok >= n {
+			return true
+		}
+	}
+}
+
 // Wait pings host every interval until it has been unreachable for
 // fallback. It returns true when the outage is confirmed, false if ctx was
 // cancelled first. A successful ping resets the downtime.

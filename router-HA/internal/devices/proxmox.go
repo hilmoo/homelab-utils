@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,13 +18,16 @@ type GuestOptions struct {
 	DryRun bool
 }
 
-type guest struct {
-	id   int
-	kind string // "qm" or "pct"
+type Guest struct {
+	ID   int
+	Kind string // "qm" or "pct"
 }
 
 // ShutdownGuests gracefully shuts down every running guest except GuestOptions.Keep.
-func ShutdownGuests(ctx context.Context, o GuestOptions) error {
+// It returns the guests it issued a shutdown for, even on error, so the caller
+// can start them again. If ctx is cancelled it stops waiting, but lets the
+// shutdowns already issued finish.
+func ShutdownGuests(ctx context.Context, o GuestOptions) ([]Guest, error) {
 	keep := map[int]bool{}
 	for _, id := range o.Keep {
 		keep[id] = true
@@ -31,65 +35,96 @@ func ShutdownGuests(ctx context.Context, o GuestOptions) error {
 
 	guests, err := running(ctx, keep)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(guests) == 0 {
 		log.Println("no running guests to shut down")
-		return nil
+		return nil, nil
 	}
+
+	var issued []Guest
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	for _, g := range guests {
-		log.Printf("shutting down %s %d", g.kind, g.id)
+		log.Printf("shutting down %s %d", g.Kind, g.ID)
 		if o.DryRun {
 			continue
 		}
 		// --timeout makes proxmox wait for the guest, so run them in parallel.
-		cmd := exec.CommandContext(ctx, g.kind, "shutdown", strconv.Itoa(g.id),
+		// Not CommandContext: an abort must not kill a half-done shutdown.
+		cmd := exec.Command(g.Kind, "shutdown", strconv.Itoa(g.ID),
 			"--timeout", strconv.Itoa(int(o.Wait.Seconds())))
 		if err := cmd.Start(); err != nil {
-			log.Printf("%s shutdown %d: %v", g.kind, g.id, err)
+			log.Printf("%s shutdown %d: %v", g.Kind, g.ID, err)
 			continue
 		}
-		go cmd.Wait()
+		issued = append(issued, g)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cmd.Wait()
+		}()
 	}
 	if o.DryRun {
-		return nil
+		return nil, nil
 	}
 
 	deadline := time.Now().Add(o.Wait + 10*time.Second)
 	for time.Now().Before(deadline) {
 		left, err := running(ctx, keep)
 		if err != nil {
-			return err
+			return issued, err
 		}
 		if len(left) == 0 {
-			return nil
+			return issued, nil
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return issued, ctx.Err()
 		case <-time.After(3 * time.Second):
 		}
 	}
 
 	left, _ := running(ctx, keep)
 	if len(left) == 0 {
-		return nil
+		return issued, nil
 	}
 	if !o.Force {
-		return fmt.Errorf("%d guests still running after %s", len(left), o.Wait)
+		return issued, fmt.Errorf("%d guests still running after %s", len(left), o.Wait)
 	}
 	for _, g := range left {
-		log.Printf("force stopping %s %d", g.kind, g.id)
-		if err := exec.CommandContext(ctx, g.kind, "stop", strconv.Itoa(g.id)).Run(); err != nil {
-			log.Printf("%s stop %d: %v", g.kind, g.id, err)
+		log.Printf("force stopping %s %d", g.Kind, g.ID)
+		if err := exec.CommandContext(ctx, g.Kind, "stop", strconv.Itoa(g.ID)).Run(); err != nil {
+			log.Printf("%s stop %d: %v", g.Kind, g.ID, err)
 		}
+	}
+	return issued, nil
+}
+
+// StartGuests starts guests again through Proxmox's startall (pvenode), which honours
+// each guest's configured startup order and up-delays (the "startup" option).
+// Guests that are already running are skipped.
+func StartGuests(ctx context.Context, guests []Guest) error {
+	if len(guests) == 0 {
+		return nil
+	}
+	ids := make([]string, len(guests))
+	for i, g := range guests {
+		ids[i] = strconv.Itoa(g.ID)
+	}
+	list := strings.Join(ids, ",")
+	log.Printf("starting guests %s in their startup order", list)
+	// --force: start even guests with onboot unset/0.
+	out, err := exec.CommandContext(ctx, "pvenode", "startall", "--vms", list, "--force").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("pvenode startall: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
 // running lists running VMs (qm) and containers (pct) whose ID is not in keep.
-func running(ctx context.Context, keep map[int]bool) ([]guest, error) {
-	var out []guest
+func running(ctx context.Context, keep map[int]bool) ([]Guest, error) {
+	var out []Guest
 	for _, kind := range []string{"qm", "pct"} {
 		b, err := exec.CommandContext(ctx, kind, "list").Output()
 		if err != nil {
@@ -110,7 +145,7 @@ func running(ctx context.Context, keep map[int]bool) ([]guest, error) {
 				status = f[1]
 			}
 			if status == "running" {
-				out = append(out, guest{id, kind})
+				out = append(out, Guest{id, kind})
 			}
 		}
 	}

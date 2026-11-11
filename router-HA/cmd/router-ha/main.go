@@ -53,13 +53,27 @@ func main() {
 	log.Printf("pinging %s every %s, procedure starts after %s unreachable (dry-run=%v)",
 		c.PingHost, c.PingInterval, c.Fallback, c.DryRun)
 
-	if !outage.Wait(ctx, c.PingHost, c.PingInterval, c.PingTimeout, c.Fallback) {
-		log.Println("exiting")
-		return
-	}
+	// If the sequence is aborted because the host came back, go back to
+	// monitoring.
+	for {
+		if !outage.Wait(ctx, c.PingHost, c.PingInterval, c.PingTimeout, c.Fallback) {
+			log.Println("exiting")
+			return
+		}
 
-	cancelJobs() // the host is going down; stop any pending retries
-	outage.Run(ctx, c, rt, pl)
+		cancelJobs() // the host is going down; stop any pending retries
+		if outage.Run(ctx, c, rt, pl) {
+			break
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		log.Println("shutdown aborted, monitoring again")
+		// The sequence may have turned the SSIDs on; put them back like at
+		// startup. (The plug /on is already sent by the undo.)
+		jobsCtx, cancelJobs = context.WithCancel(ctx)
+		go rt.DisableAfter(jobsCtx, c.SSIDOffAfter, c.PlugOnRetry)
+	}
 
 	log.Printf("[final] running %v", c.ShutdownArgs)
 	if c.DryRun {

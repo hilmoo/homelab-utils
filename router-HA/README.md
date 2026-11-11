@@ -27,9 +27,15 @@ Main loop:
    It waits up to `guest_wait`, then force-stops leftovers if `guest_force` is true.
 5. Log in to the router and enable the SSIDs in `ssids` (default `1,5`).
 6. Wait `off_delay`, then `GET <plug_url>/off`. It must return `200 OK`. It retries up to `off_tries` times.
-7. Run `shutdown_cmd` (default `systemctl poweroff`).
+7. Send a final Discord message.
+8. Run `shutdown_cmd` (default `systemctl poweroff`).
 
-A failing step (3–6) is logged and the procedure continues, because the host should still shut down.
+A failing step (3–7) is logged and the procedure continues, because the host should still shut down.
+
+If `ping_host` answers `recover_pings` times in a row during steps 3–7, the sequence is aborted:
+`/on` is sent (if `/off` was reached), the guests this program stopped are started again
+with Proxmox `startall` (which honours each guest's startup order and delays), a Discord
+message is sent, and monitoring resumes. Once `shutdown_cmd` has started, nothing is aborted.
 
 ## Configuration
 
@@ -50,6 +56,7 @@ The only command-line flags are:
 | `ping_interval` | `10s` | Time between pings |
 | `ping_timeout` | `2s` | Timeout of a single ping |
 | `fallback` | `2m` | Continuous downtime before the procedure starts |
+| `recover_pings` | `3` | Consecutive successful pings that abort a running shutdown sequence |
 | `discord_webhook` | _(empty)_ | Discord webhook URL; empty skips the notification |
 | `keep_ids` | `[]` | VM/LXC IDs that are not shut down |
 | `guest_wait` | `3m` | Max wait for guests to shut down |
