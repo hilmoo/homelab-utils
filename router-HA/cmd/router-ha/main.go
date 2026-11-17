@@ -47,7 +47,8 @@ func main() {
 	// Startup background jobs: /on until 200 OK, and SSIDs off after a delay.
 	jobsCtx, cancelJobs := context.WithCancel(ctx)
 	defer cancelJobs()
-	go pl.OnUntilOK(jobsCtx, c.PlugOnRetry)
+	go outage.NotifyPowerBack(jobsCtx, c)
+	go outage.SendOn(jobsCtx, c, pl)
 	go rt.DisableAfter(jobsCtx, c.SSIDOffAfter, c.PlugOnRetry)
 
 	log.Printf("pinging %s every %s, procedure starts after %s unreachable (dry-run=%v)",

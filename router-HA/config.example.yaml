@@ -26,6 +26,8 @@ ssid_off_after: 5m      # after app start, wait this long then turn ssids off
 # --- device with /on and /off ---
 plug_url: http://192.168.1.3
 on_retry: 5s            # retry interval for the startup /on and ssid-off jobs
+on_wait_ids: []         # VM/LXC IDs that must be running before /on is sent, e.g. [100, 101]
+on_wait_timeout: 10m    # give up waiting and send /on anyway after this long (0 = wait forever)
 off_delay: 5m           # wait between enabling ssids and sending /off
 off_retry: 5s
 off_tries: 5

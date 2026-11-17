@@ -122,6 +122,44 @@ func StartGuests(ctx context.Context, guests []Guest) error {
 	return nil
 }
 
+// WaitGuestsRunning blocks until every guest in ids is running. It returns
+// false if ctx was cancelled or timeout (0 = none) passed first.
+func WaitGuestsRunning(ctx context.Context, ids []int, poll, timeout time.Duration) bool {
+	if len(ids) == 0 {
+		return true
+	}
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	for {
+		up := map[int]bool{}
+		if list, err := running(ctx, map[int]bool{}); err != nil {
+			log.Printf("[on-wait] %v", err)
+		} else {
+			for _, g := range list {
+				up[g.ID] = true
+			}
+		}
+		var missing []int
+		for _, id := range ids {
+			if !up[id] {
+				missing = append(missing, id)
+			}
+		}
+		if len(missing) == 0 {
+			return true
+		}
+		log.Printf("[on-wait] waiting for guests %v to run", missing)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(poll):
+		}
+	}
+}
+
 // running lists running VMs (qm) and containers (pct) whose ID is not in keep.
 func running(ctx context.Context, keep map[int]bool) ([]Guest, error) {
 	var out []Guest

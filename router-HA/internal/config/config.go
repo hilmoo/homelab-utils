@@ -32,14 +32,16 @@ type Config struct {
 	SSIDs        []int         `koanf:"ssids"`
 	SSIDOffAfter time.Duration `koanf:"ssid_off_after"`
 
-	PlugBase    string        `koanf:"plug_url"`
-	PlugOnRetry time.Duration `koanf:"on_retry"`
-	OffDelay    time.Duration `koanf:"off_delay"`
-	OffRetry    time.Duration `koanf:"off_retry"`
-	OffMaxTries int           `koanf:"off_tries"`
-	HTTPTimeout time.Duration `koanf:"http_timeout"`
-	ShutdownCmd string        `koanf:"shutdown_cmd"`
-	DryRun      bool          `koanf:"dry_run"`
+	PlugBase      string        `koanf:"plug_url"`
+	PlugOnRetry   time.Duration `koanf:"on_retry"`
+	OnWaitIDs     []int         `koanf:"on_wait_ids"`
+	OnWaitTimeout time.Duration `koanf:"on_wait_timeout"`
+	OffDelay      time.Duration `koanf:"off_delay"`
+	OffRetry      time.Duration `koanf:"off_retry"`
+	OffMaxTries   int           `koanf:"off_tries"`
+	HTTPTimeout   time.Duration `koanf:"http_timeout"`
+	ShutdownCmd   string        `koanf:"shutdown_cmd"`
+	DryRun        bool          `koanf:"dry_run"`
 
 	// ShutdownArgs is ShutdownCmd split into program and arguments.
 	ShutdownArgs []string `koanf:"-"`
@@ -60,6 +62,7 @@ func defaults() *Config {
 		SSIDOffAfter:  5 * time.Minute,
 		PlugBase:      "http://192.168.1.3",
 		PlugOnRetry:   5 * time.Second,
+		OnWaitTimeout: 10 * time.Minute,
 		OffDelay:      5 * time.Minute,
 		OffRetry:      5 * time.Second,
 		OffMaxTries:   5,

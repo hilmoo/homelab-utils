@@ -90,13 +90,40 @@ func undo(ctx context.Context, c *config.Config, pl *devices.Plug, stopped []dev
 	log.Println("[undo] power is back, reverting")
 	if plugReached {
 		log.Println("[undo] sending /on")
-		go pl.OnUntilOK(ctx, c.PlugOnRetry) // may be unreachable; must not block monitoring
+		go SendOn(ctx, c, pl) // may be unreachable; must not block monitoring
 	}
 	if err := devices.StartGuests(ctx, stopped); err != nil {
 		log.Printf("[undo] start guests FAILED: %v", err)
 	}
 	if err := notifyCancelled(ctx, c, len(stopped)); err != nil {
 		log.Printf("[undo] discord webhook FAILED: %v", err)
+	}
+}
+
+// SendOn waits for the configured guests to run (up to on_wait_timeout), then
+// requests /on until it succeeds. Meant to run as a background job.
+func SendOn(ctx context.Context, c *config.Config, pl *devices.Plug) {
+	if len(c.OnWaitIDs) > 0 && !c.DryRun {
+		log.Printf("[on-job] waiting for guests %v before /on", c.OnWaitIDs)
+		if !devices.WaitGuestsRunning(ctx, c.OnWaitIDs, c.PlugOnRetry, c.OnWaitTimeout) {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("[on-job] guests not running after %s, sending /on anyway", c.OnWaitTimeout)
+		}
+	}
+	pl.OnUntilOK(ctx, c.PlugOnRetry)
+}
+
+// NotifyPowerBack tells Discord that the host has booted after an outage.
+func NotifyPowerBack(ctx context.Context, c *config.Config) {
+	if c.DiscordWebhook == "" {
+		return
+	}
+	host, _ := os.Hostname()
+	msg := fmt.Sprintf("⚡ Power is back. Proxmox host `%s` has started.", host)
+	if err := devices.SendDiscord(ctx, c.DiscordWebhook, msg, c.HTTPTimeout); err != nil {
+		log.Printf("power-back discord webhook FAILED: %v", err)
 	}
 }
 
